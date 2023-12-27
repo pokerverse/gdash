@@ -50,85 +50,25 @@ export const mapToObject = <T>(map: Map<T, unknown>): unknown => {
 };
 
 /**
- * nameToDuplicate, existingnames -> output
- * abc, [abc, abc (3), xyc] -> abc (4)
- * abc (2), [abc, abc (2), abc (2) (1), abc (2) (2), abc (3)] -> abc (4)
- * abc_(2), [abc, abc_(2), abc (3)] -> abc_(2) (1)
- *
- * if(existingNames.includes(name)) {
- *  name = getSafeName(name, existingNames);
- * }
- */
-export const getSafeName = (originalName: string, existingNames: string[]): string => {
-  const nameSeriesExtractorRegex = {
-    // *? makes the first part not greedy
-    // (?:xxxx)? in the second part after the base makes the second part optional
-    // used to match patterns like Hello (123)
-    regex: /^(.*?)(?:\s\((\d+)\))?$/,
-    errorMessage: "no name series found"
-  }
-  
-  if(!existingNames.includes(originalName)) {
-    return originalName;
-  }
-  const res = nameSeriesExtractorRegex.regex.exec(originalName);
-  const seriesBase = res?.[1] ?? originalName;
-  const sameSeriesInExistingNames = existingNames.filter(u => u.startsWith(seriesBase)); //filter existingNames
-  const series = sameSeriesInExistingNames.map(currName => {
-    const matchedGroups = nameSeriesExtractorRegex.regex.exec(currName);
-    return parseInt(matchedGroups?.[2] ?? "0");
-  });
-  let maxInSeries = series.reduce((a, b) => a >= b ? a : b);
-  if(maxInSeries === undefined) {
-    maxInSeries = 0;
-  }
-  return `${seriesBase} (${maxInSeries + 1})`;
-};
-
-/**
- * Problem: In getSafeName, file extensions aren't considered.
- * So: image.png's safe name becomes "image.png (1)" - but it should have become "image (1).png"
- * 
- * Simple algorithm:
- * 1) Extract extension from originalName. (say .abc)
- * 2) Remove ".abc" from existing names if found
- * 3) Call getSafeName
- * 4) Add ".abc" back to the returned name from step 3.
- */
-export const getSafeNameForFilename = (originalName: string, existingNames: string[]): string => {
-  //"image.png".split(".") returns ["image", "png"]
-  const splitName = originalName.split(".");
-  const ext = splitName[splitName.length - 1];
-  if(splitName.length < 2 || splitName[0] === "" || ext === undefined) { //i.e. no extension found OR it's a hidden file like .htaccess
-    return getSafeName(originalName, existingNames);
-  } else {
-    const extLen = ext.length;
-    const originalNameWithoutExt = splitName.slice(0, -1).join("."); //extension was "pop'ed" out, so this is the name without extension
-    const existingNamesWithoutExt = [];
-    for (const en of existingNames) {
-      const enExt = en.substring(en.length - extLen, en.length);
-      if(enExt === ext) {
-        const enWithoutExt = en.split(".").slice(0, -1).join(".");
-        existingNamesWithoutExt.push(enWithoutExt);
-      } else {
-        existingNamesWithoutExt.push(en);
-      }
-    }
-    const safeNameWithoutExt = getSafeName(originalNameWithoutExt, existingNamesWithoutExt);
-    return `${safeNameWithoutExt}.${ext}`;
-  }
-
-}
-
-/**
  * Date.now() gives an output like 1602018008290 (13 digits)
- * The list three digits represent milliseconds.
+ * The last three digits represent milliseconds.
  * Overlaps using a simple Date.now() happen when two ids generated in the same millisecond.
  * So, add a random value.
  * IF we add (Math.random() * 1000), 3 random digits get added and chances of overlap reduce to 1 in 1000
  * IF we add (Math.random() * 1000000). 6 random digits get added and chances of overlap reduce to 1 in 10^6
  */
 export const generateId = (): number => Math.floor(Date.now() + (Math.random() * 1000000));
+
+/**
+ * JS integers (without period) are accurate upto 15 digits
+ * So generateIdV2 returns a 15 digit integer
+ * Math.random() returns a random number between 0 (inclusive),  and 1 (exclusive)
+ * the output is 0.xxxx (16 decimal places)
+ * So Math.random() * 0.9e16 is a max of 899... 15 integer digits, 1 decimal digit.
+ * Adding 0.1e16 ensures the first digit isn't 0. Math.floor removes the decimal digit.
+ * So, we are guranteed a 15 digit integer between 1^15 (inclusive) and 1^16 (exclusive)
+ */
+export const generateIdV2 = (): number => Math.floor(Math.random() * 0.9e16 + 0.1e16);
 
 /**
  * Set operations, from https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set

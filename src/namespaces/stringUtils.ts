@@ -127,7 +127,7 @@ export const getQueryParam = ({ url, key }: { url: string, key: string }): strin
 
 export const getAllQueryParams = ({ url }: { url: string }): Record<string, unknown> => {
   const urlObj = new URL(url);
-  const queryParams: any = {};
+  const queryParams: Record<string, unknown> = {};
   urlObj.searchParams.forEach((value, key) => {
     queryParams[key] = value;
   });
@@ -153,7 +153,7 @@ export const isURLValid = (url: string): boolean => {
  * \v — Vertical tabulator
  * @param name
  */
-export function escape(name: string) {
+export function escape(name: string): string {
   return name
     .replace(/[\b]/g, `\\b`)
     .replace(/[\f]/g, `\\f`)
@@ -163,8 +163,11 @@ export function escape(name: string) {
     .replace(/[\v]/g, `\\v`);
 }
 
-// make the name string safe to use.
-function makeNameSafe(name = "", regex: RegExp) {
+/*
+ * Make the name string safe to use.
+ * Replaces all characters that are not a part of the regex with _
+ */
+function makeNameSafe(name = "", regex: RegExp): string {
   name = escape(name);
   // * First find the unsafe characters from the string - returns an array of unsafe characters (including consequtive chars) ex: ["*&^", "+", "<>"]
   // * taken from here: https://stackoverflow.com/a/20541853
@@ -189,44 +192,66 @@ function makeNameSafe(name = "", regex: RegExp) {
  */
 
 // safe name set according to: https://docs.google.com/document/d/18vQN_rS2zasDKUZ_efwXhxKEukLKRCRoQVqn8tv8g8A/edit#
-export const safeNameRegexL1 = /[a-zA-Z0-9-_.'()\s,+\[\]:*&<>~]/g;
-export const safeNameRegexL2 = /[a-zA-Z0-9-_.'()\s,]/g;
-export const safeNameRegexL3 = /[a-zA-Z0-9_-]/g;
+export const safeNameRegexL1 = /[a-zA-Z0-9-_.'()\s,+\[\]:*&<>~]/g; //Project / scene name
+export const safeNameRegexL2 = /[a-zA-Z0-9-_.'()\s,]/g; //Used for file/folder names + variable names
+export const safeNameRegexL3 = /[a-zA-Z0-9_-]/g; //Most strict, used for slugs
+
+/**
+ * Save RegExps that use to .test() strings as strings. 
+ * Saving them as RegExp in a central library is risky as RegExp themselves are stateful
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/test
+ * 
+ * To use: new RegExp(safeNameRegexL3CheckString, "g").test(testString);
+ * 
+ * The below is used for checking orgSlugs and depSlugs created using L3
+ */
+export const safeNameRegexL3CheckString = "^([a-zA-Z0-9_-]+)$"; // /^([a-zA-Z0-9_-]+)$/g;
 
 /**
  * Least strict, used for project/scene/element names
- * @param name
  */
-export function makeNameSafeL1(name: string) {
+export function makeNameSafeL1(name: string): string {
   return makeNameSafe(name.trim(), safeNameRegexL1);
 }
 
 /**
  * Medium strict, used for file/folder names + variable names
- * @param name
  */
-export function makeNameSafeL2(name: string) {
+export function makeNameSafeL2(name: string): string {
   return makeNameSafe(name.trim(), safeNameRegexL2);
 }
 
 /**
  * Most strict, used for slugs
- * @param name
  */
-export function makeNameSafeL3(name: string) {
+export function makeNameSafeL3(name: string): string {
   return makeNameSafe(name.trim(), safeNameRegexL3);
 }
 
-const nameSeriesExtractorRegex = {
-  // *? makes the first part not greedy
-  // (?:xxxx)? in the second part after the base makes the second part optional
-  // used to match patterns like Hello (123)
-  regex: /^(.*?)(?:\s\((\d+)\))?$/,
-  errorMessage: "no name series found"
-};
 
-export function makeNameUnique(originalName: string, existingNames: string[]) {
-  if (!existingNames.includes(originalName)) {
+
+/**
+ * nameToDuplicate, existingnames -> output
+ * abc, [abc, abc (3), xyc] -> abc (4)
+ * abc (2), [abc, abc (2), abc (2) (1), abc (2) (2), abc (3)] -> abc (4)
+ * abc_(2), [abc, abc_(2), abc (3)] -> abc_(2) (1)
+ *
+ * if(existingNames.includes(name)) {
+ *  name = getUniqueName(name, existingNames);
+ * }
+ * 
+ * This fn doesn't ensure only safe characters are use. For that, use makeNameSafeLx.
+ */
+export const getUniqueName = (originalName: string, existingNames: string[]): string => {
+  const nameSeriesExtractorRegex = {
+    // *? makes the first part not greedy
+    // (?:xxxx)? in the second part after the base makes the second part optional
+    // used to match patterns like Hello (123)
+    regex: /^(.*?)(?:\s\((\d+)\))?$/, //space allowed
+    errorMessage: "no name series found"
+  }
+  
+  if(!existingNames.includes(originalName)) {
     return originalName;
   }
   const res = nameSeriesExtractorRegex.regex.exec(originalName);
@@ -237,8 +262,149 @@ export function makeNameUnique(originalName: string, existingNames: string[]) {
     return parseInt(matchedGroups?.[2] ?? "0");
   });
   let maxInSeries = series.reduce((a, b) => a >= b ? a : b);
-  if (maxInSeries === undefined) {
+  if(maxInSeries === undefined) {
     maxInSeries = 0;
   }
   return `${seriesBase} (${maxInSeries + 1})`;
+};
+
+/**
+ * nameToDuplicate, existingnames -> output
+ *
+ * if(existingSlugs.includes(name)) {
+ *  name = getUniqueSlug(slug, existingSlugs);
+ * }
+ * 
+ * This fn doesn't ensure only safe characters are use. For that, use makeNameSafeLx.
+ */
+export const getUniqueSlug = (originalName: string, existingNames: string[]): string => {
+  const nameSeriesExtractorRegex = {
+    // *? makes the first part not greedy
+    // (?:xxxx)? in the second part after the base makes the second part optional
+    // used to match patterns like Hello_123
+    regex: /^(.*?)(?:\_(\d+))?$/, //No space (\s) allowed 
+    errorMessage: "no name series found"
+  }
+
+  if (!existingNames.includes(originalName)) {
+    return originalName;
+  }
+
+  const res = nameSeriesExtractorRegex.regex.exec(originalName);
+  const seriesBase = res?.[1] ?? originalName;
+  const sameSeriesInExistingNames = existingNames.filter(u => u.startsWith(seriesBase)); //filter existingNames
+  
+  const series = sameSeriesInExistingNames.map(currName => {
+    const matchedGroups = nameSeriesExtractorRegex.regex.exec(currName);
+    return parseInt(matchedGroups?.[2] ?? "0");
+  });
+
+  let maxInSeries = series.reduce((a, b) => a >= b ? a : b);
+  if (maxInSeries === undefined) {
+    maxInSeries = 0;
+  }
+
+  return `${seriesBase}_${maxInSeries + 1}`;
+};
+
+/**
+ * Problem: In getUniqueName, file extensions aren't considered.
+ * So: image.png's safe name becomes "image.png (1)" - but it should have become "image (1).png"
+ * 
+ * Simple algorithm:
+ * 1) Extract extension from originalName. (say .abc)
+ * 2) Remove ".abc" from existing names if found
+ * 3) Call getUniqueName
+ * 4) Add ".abc" back to the returned name from step 3.
+ * 
+ * This fn doesn't ensure only safe characters are use. For that, use makeNameSafeLx.
+ */
+export const getUniqueNameForFilename = (originalName: string, existingNames: string[]): string => {
+  //"image.png".split(".") returns ["image", "png"]
+  const splitName = originalName.split(".");
+  const ext = splitName[splitName.length - 1];
+  if(splitName.length < 2 || splitName[0] === "" || ext === undefined) { //i.e. no extension found OR it's a hidden file like .htaccess
+    return getUniqueName(originalName, existingNames);
+  } else {
+    const extLen = ext.length;
+    const originalNameWithoutExt = splitName.slice(0, -1).join("."); //extension was "pop'ed" out, so this is the name without extension
+    const existingNamesWithoutExt = [];
+    for (const en of existingNames) {
+      const enExt = en.substring(en.length - extLen, en.length);
+      if(enExt === ext) {
+        const enWithoutExt = en.split(".").slice(0, -1).join(".");
+        existingNamesWithoutExt.push(enWithoutExt);
+      } else {
+        existingNamesWithoutExt.push(en);
+      }
+    }
+    const safeNameWithoutExt = getUniqueName(originalNameWithoutExt, existingNamesWithoutExt);
+    return `${safeNameWithoutExt}.${ext}`;
+  }
+}
+
+const deploymentSlugBlacklist = ["test"];
+const organizationCNameBlacklist = ["vr", "metaverse", "test"];
+
+/**
+ * 1. Ensures only safe characters are used
+ * 2. Ensures duplicate names are used
+ * 3. Ensures blacklisted names are removed
+ */
+export const getSafeAndUniqueDeploymentSlug = (originalName: string, existingNames: string[]): string => {
+  const safeOriginalName = makeNameSafeL3(originalName);
+  const existingNameWithBlacklist = [...existingNames, ...deploymentSlugBlacklist];
+  return getUniqueSlug(safeOriginalName, existingNameWithBlacklist);
+}
+
+/**
+ * 1. Ensures only safe characters are used
+ * 2. Ensures duplicate names are used
+ * 3. Ensures blacklisted names are removed
+ */
+export const getSafeAndUniqueOrgCName = (originalName: string, existingNames: string[]): string => {
+  const safeOriginalName = makeNameSafeL3(originalName);
+  const existingNameWithBlacklist = [...existingNames, ...organizationCNameBlacklist];
+  return getUniqueSlug(safeOriginalName, existingNameWithBlacklist);
+}
+
+
+/**
+ * 1. Ensures only safe characters are used
+ * 2. Ensures duplicate names are used
+ */
+export const getSafeAndUniqueProjectName = (originalName: string, existingNames: string[]): string => {
+  const safeOriginalName = makeNameSafeL1(originalName);
+  return getUniqueName(safeOriginalName, existingNames);
+}
+
+/**
+ * 1. Ensures only safe characters are used
+ * 2. Ensures duplicate names are used
+ */
+export const getSafeAndUniqueFileName = (originalName: string, existingNames: string[]): string => {
+  const safeOriginalName = makeNameSafeL2(originalName);
+  return getUniqueNameForFilename(safeOriginalName, existingNames);
+}
+
+/**
+ * 1. Ensures only safe characters are used
+ * 2. Ensures duplicate names are used
+ */
+export const getSafeAndUniqueRecordName = (originalName: string, existingNames: string[]): string => {
+  const safeOriginalName = makeNameSafeL1(originalName);
+  return getUniqueName(safeOriginalName, existingNames);
+}
+
+export const getRandomAvatarName = (): string => {
+  const randomAdjective = getRandomFromArray(SAFE_ADJECTIVES);
+  const randomAnimal = getRandomFromArray(SAFE_ANIMALS);
+  return `${randomAdjective} ${randomAnimal}`;
+}
+
+const SAFE_ADJECTIVES = ["Friendly", "Brave", "Clever", "Playful", "Cheerful", "Gentle", "Kind", "Energetic", "Wise", "Curious", "Loyal", "Joyful", "Polite", "Calm", "Caring", "Honest", "Imaginative", "Patient", "Reliable", "Sincere", "Trustworthy", "Generous", "Grateful", "Optimistic", "Respectful", "Supportive", "Thoughtful", "Warm", "Humble", "Creative", ];
+const SAFE_ANIMALS = ["Lion", "Tiger", "Giraffe", "Zebra", "Dolphin", "Penguin", "Koala", "Owl", "Panda", "Fox", "Rabbit", "Turtle", "Kangaroo", "Bear", "Deer", "Wolf", "Horse", "Swan", "Squirrel", "Peacock", "Cheetah", "Hedgehog", "Dolphin", "Otter", "Flamingo", "Octopus", "Camel", "Shark", "Eagle", "Orangutan", "Gorilla", "Platypus", "Parrot", "Lobster", "Alligator", "Ostrich", "Armadillo", "Meerkat", "Hyena", "Seahorse", "Toucan", "Walrus", "Llama", ];
+
+function getRandomFromArray <T>(list: Array<T>): T {
+  return list[Math.floor(Math.random() * list.length)];
 }
